@@ -237,8 +237,8 @@ Example:
 
 ## Project Links
 
-- Repository: https://github.com/0dividedby0/VictoryMonument
-- Issues: https://github.com/0dividedby0/VictoryMonument/issues
+- Repository: https://github.com/0divMods/VictoryMonument
+- Issues: https://github.com/0divMods/VictoryMonument/issues
 
 ## Release Notes (1.0.0)
 
