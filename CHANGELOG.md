@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows semantic versioning.
 
-## [1.0.0-beta.2] - 2026-04-18
+## [1.0.0] - 2026-06-29
 
 ### Added
 - Per-structure spawn rules in `victorymod.json5` for biome filtering and height selection.
@@ -13,6 +13,11 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ### Changed
 - Updated config initialization to use Forge's config directory path so the mod behaves correctly in shared dev-pack runs and other nonstandard launch environments.
+- Removed beta version tags for the stable publish build.
+- Increased the default dungeon minimum radius and structure buffer distance to reduce overlaps around spawn.
+- Improved dungeon placement fallback order so terrain and inner-radius constraints relax before structure spacing is abandoned.
+- Kept the configured maximum dungeon radius as a hard cap for normal and forced placements.
+- Reduced dungeon coordinate logging so only the victory monument location is revealed.
 
 ## [1.0.0-beta.1] - 2026-04-02
 

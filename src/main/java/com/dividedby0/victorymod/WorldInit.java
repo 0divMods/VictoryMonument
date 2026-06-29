@@ -29,8 +29,6 @@ public class WorldInit {
 
         if (data.isStructuresSpawned()) return;
 
-        data.setStructuresSpawned(true);
-        data.setDirty();
         StructureSpawner.spawnAll(level);
     }
 

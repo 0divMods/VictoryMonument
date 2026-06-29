@@ -55,7 +55,7 @@ public class JSON5ConfigManager {
      */
     private void initializeMetadata() {
         configMetadata.put("minDungeonRadius", new ConfigEntry(
-            "minDungeonRadius", 40, "int",
+            "minDungeonRadius", 200, "int",
             "Minimum radius for dungeon placement around spawn point (in blocks)"
         ));
         configMetadata.get("minDungeonRadius").minValue = 10;
@@ -69,7 +69,7 @@ public class JSON5ConfigManager {
         configMetadata.get("maxDungeonRadius").maxValue = 1000;
 
         configMetadata.put("structureBufferDistance", new ConfigEntry(
-            "structureBufferDistance", 30, "int",
+            "structureBufferDistance", 64, "int",
             "Minimum buffer distance between structures to prevent overlap (in blocks)"
         ));
         configMetadata.get("structureBufferDistance").minValue = 5;
@@ -373,21 +373,30 @@ public class JSON5ConfigManager {
         JsonObject structures = new JsonObject();
         structures.add("victory_monument", new JsonObject());
         structures.add("dungeon_white", new JsonObject());
-        structures.add("dungeon_orange", new JsonObject());
+        structures.add("dungeon_orange", createSurfaceOffsetOverride(-20));
         structures.add("dungeon_magenta", new JsonObject());
         structures.add("dungeon_lightblue", new JsonObject());
         structures.add("dungeon_yellow", new JsonObject());
         structures.add("dungeon_lime", new JsonObject());
         structures.add("dungeon_pink", new JsonObject());
         structures.add("dungeon_gray", new JsonObject());
-        structures.add("dungeon_lightgray", new JsonObject());
+        structures.add("dungeon_lightgray", createSurfaceOffsetOverride(20));
         structures.add("dungeon_cyan", new JsonObject());
         structures.add("dungeon_purple", new JsonObject());
         structures.add("dungeon_blue", new JsonObject());
-        structures.add("dungeon_brown", new JsonObject());
+        structures.add("dungeon_brown", createSurfaceOffsetOverride(-11));
         structures.add("dungeon_green", new JsonObject());
-        structures.add("dungeon_red", new JsonObject());
+        structures.add("dungeon_red", createSurfaceOffsetOverride(-2));
         structures.add("dungeon_black", new JsonObject());
         return structures;
+    }
+
+    private static JsonObject createSurfaceOffsetOverride(int surfaceOffset) {
+        JsonObject root = new JsonObject();
+        JsonObject height = new JsonObject();
+        height.addProperty("mode", "surface");
+        height.addProperty("surfaceOffset", surfaceOffset);
+        root.add("height", height);
+        return root;
     }
 }

@@ -31,54 +31,99 @@ public class StructureSpawner {
     private static final List<BlockPos> placedStructures = new ArrayList<>();
 
     public static void spawnAll(ServerLevel level) {
-        placedStructures.clear();
+        SpawnJob job = new SpawnJob(level.getSharedSpawnPos());
+        job.start(level);
+        while (job.spawnNext(level)) {
+            // Keep the legacy immediate path for tests or future commands.
+        }
+        job.finish(level);
+    }
 
-        BlockPos spawn = level.getSharedSpawnPos();
+    private static final class SpawnJob {
+        private final BlockPos spawn;
+        private final Random rand = new Random();
 
-        int spawnX = spawn.getX();
-        int spawnZ = spawn.getZ();
-        Random rand = new Random();
-        JSON5ConfigManager configManager = ConfigManager.getInstance();
-        int minRadius = configManager.getInt("minDungeonRadius", 40);
-        int maxRadius = configManager.getInt("maxDungeonRadius", 750);
-        int bufferDistance = configManager.getInt("structureBufferDistance", 30);
-        JsonObject defaultRules = configManager.getJsonObject("defaultRules", new JsonObject());
-        JsonObject structureOverrides = configManager.getJsonObject("structures", new JsonObject());
-        StructureRules monumentRules = getRulesForStructure("victory_monument", defaultRules, structureOverrides);
+        private JSON5ConfigManager configManager;
+        private JsonObject defaultRules;
+        private JsonObject structureOverrides;
+        private int minRadius;
+        private int maxRadius;
+        private int bufferDistance;
+        private int nextStructureIndex = -1;
+        private int dungeonsPlaced;
+        private int dungeonsFailed;
+        private long startedAtNanos;
 
-        BlockPos victoryPos = createCandidatePos(level, rand, spawnX, spawnZ, monumentRules);
-        if (victoryPos == null) {
-            victoryPos = new BlockPos(spawnX, getGroundY(level, spawnX, spawnZ), spawnZ);
+        private SpawnJob(BlockPos spawn) {
+            this.spawn = spawn;
         }
 
-        // Try to find a valid location for the victory monument
-        BlockPos validMonumentPos = victoryPos;
-        if (!isValidSpawnLocation(level, victoryPos, monumentRules)) {
-            // If exact spawn is invalid, search nearby for a valid location
-            validMonumentPos = findNearbyValidLocation(level, rand, spawnX, spawnZ, 100, monumentRules);
-            if (validMonumentPos == null) {
-                System.err.println("[VictoryMod] Could not find valid spawn location for victory monument!");
-                validMonumentPos = victoryPos;
+        private void start(ServerLevel level) {
+            placedStructures.clear();
+            configManager = ConfigManager.getInstance();
+            minRadius = configManager.getInt("minDungeonRadius", 40);
+            maxRadius = configManager.getInt("maxDungeonRadius", 750);
+            bufferDistance = configManager.getInt("structureBufferDistance", 30);
+            defaultRules = configManager.getJsonObject("defaultRules", new JsonObject());
+            structureOverrides = configManager.getJsonObject("structures", new JsonObject());
+            startedAtNanos = System.nanoTime();
+
+            System.out.println("[VictoryMod] starting structure placement at world creation");
+        }
+
+        private boolean spawnNext(ServerLevel level) {
+            if (nextStructureIndex == -1) {
+                spawnMonument(level);
+                nextStructureIndex++;
+                return true;
             }
+
+            if (nextStructureIndex >= COLORS.length) {
+                return false;
+            }
+
+            spawnDungeon(level, COLORS[nextStructureIndex]);
+            nextStructureIndex++;
+            return true;
         }
 
-        placeStructure(level, "victory_monument", validMonumentPos);
-        placedStructures.add(validMonumentPos);
+        private void spawnMonument(ServerLevel level) {
+            long started = System.nanoTime();
+            StructureRules monumentRules = getRulesForStructure("victory_monument", defaultRules, structureOverrides);
+            BlockPos victoryPos = createCandidatePos(level, rand, spawn.getX(), spawn.getZ(), monumentRules);
+            if (victoryPos == null) {
+                victoryPos = new BlockPos(spawn.getX(), getGroundY(level, spawn.getX(), spawn.getZ()), spawn.getZ());
+            }
 
-        // Print coordinates in chat to all players
-        String msg = String.format("§6Victory Monument spawned at X: %d, Y: %d, Z: %d", validMonumentPos.getX(), validMonumentPos.getY(), validMonumentPos.getZ());
-        level.getServer().getPlayerList().broadcastSystemMessage(
-            net.minecraft.network.chat.Component.literal(msg), false
-        );
+            BlockPos validMonumentPos = victoryPos;
+            if (!isValidSpawnLocation(level, victoryPos, monumentRules)) {
+                validMonumentPos = findNearbyValidLocation(level, rand, spawn.getX(), spawn.getZ(), 100, monumentRules);
+                if (validMonumentPos == null) {
+                    System.err.println("[VictoryMod] Could not find valid spawn location for victory monument!");
+                    validMonumentPos = victoryPos;
+                }
+            }
 
-        for (String color : COLORS) {
+            if (placeStructure(level, "victory_monument", validMonumentPos)) {
+                placedStructures.add(validMonumentPos);
+            }
+
+            String msg = String.format("§6Victory Monument spawned at X: %d, Y: %d, Z: %d", validMonumentPos.getX(), validMonumentPos.getY(), validMonumentPos.getZ());
+            level.getServer().getPlayerList().broadcastSystemMessage(
+                net.minecraft.network.chat.Component.literal(msg), false
+            );
+            logTiming("victory_monument", started);
+        }
+
+        private void spawnDungeon(ServerLevel level, String color) {
             String structureName = "dungeon_" + color;
+            long started = System.nanoTime();
             StructureRules dungeonRules = getRulesForStructure(structureName, defaultRules, structureOverrides);
             BlockPos dungeonPos = spawnDungeonWithFallbacks(
                 level,
                 rand,
-                spawnX,
-                spawnZ,
+                spawn.getX(),
+                spawn.getZ(),
                 structureName,
                 minRadius,
                 maxRadius,
@@ -87,14 +132,42 @@ public class StructureSpawner {
             );
             if (dungeonPos != null) {
                 placedStructures.add(dungeonPos);
+                dungeonsPlaced++;
+            } else {
+                dungeonsFailed++;
             }
+            logTiming(structureName, started);
         }
+
+        private void finish(ServerLevel level) {
+            VictoryModSavedData data = level.getDataStorage().computeIfAbsent(
+                VictoryModSavedData::load,
+                VictoryModSavedData::new,
+                "victorymod_data"
+            );
+            data.setStructuresSpawned(true);
+            data.setDirty();
+
+            long elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L;
+            if (dungeonsPlaced == COLORS.length && dungeonsFailed == 0) {
+                System.out.println("[VictoryMod] all " + COLORS.length + " dungeons successfully spawned");
+            } else {
+                System.err.println("[VictoryMod] dungeon spawn summary: " + dungeonsPlaced + "/" + COLORS.length + " succeeded, " + dungeonsFailed + " failed");
+            }
+            System.out.println("[VictoryMod] finished structure placement in " + elapsedMs + " ms");
+        }
+    }
+
+    private static void logTiming(String structureName, long startedNanos) {
+        long elapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L;
+        System.out.println("[VictoryMod] " + structureName + " placement step took " + elapsedMs + " ms");
     }
 
     /**
      * Spawn a dungeon with progressive fallback strategies to ensure placement.
-     * Tries in order: valid location + proximity check, valid location only, 
-     * any location + proximity check, any location.
+     * Tries to keep the structure buffer as long as possible. The configured
+     * max radius is a hard cap; only terrain and inner-radius constraints relax
+     * before overlap is allowed.
      */
     private static BlockPos spawnDungeonWithFallbacks(
         ServerLevel level,
@@ -107,47 +180,65 @@ public class StructureSpawner {
         int bufferDistance,
         StructureRules rules
     ) {
-        // Strategy 1: Valid location + respect buffer distance
+        // Strategy 1: Configured radius, valid terrain, and respect buffer distance
         BlockPos pos = findDungeonLocation(level, rand, spawnX, spawnZ, minRadius, maxRadius, bufferDistance, true, true, rules);
-        if (pos != null) {
-            placeStructure(level, structureName, pos);
+        if (pos != null && placeStructure(level, structureName, pos)) {
             return pos;
         }
 
-        // Strategy 2: Valid location only (ignore buffer)
-        System.out.println("[VictoryMod] " + structureName + " relaxing buffer constraint");
-        pos = findDungeonLocation(level, rand, spawnX, spawnZ, minRadius, maxRadius, 0, true, true, rules);
-        if (pos != null) {
-            placeStructure(level, structureName, pos);
-            return pos;
-        }
-
-        // Strategy 3: Any location + respect buffer (ignore valid location check)
+        // Strategy 2: Relax terrain validation, keep radius and buffer
         System.out.println("[VictoryMod] " + structureName + " relaxing terrain validation");
         pos = findDungeonLocation(level, rand, spawnX, spawnZ, minRadius, maxRadius, bufferDistance, false, true, rules);
-        if (pos != null) {
-            placeStructure(level, structureName, pos);
+        if (pos != null && placeStructure(level, structureName, pos)) {
             return pos;
         }
 
-        // Strategy 4: Any location, any radius (ignore valid location and buffer)
-        System.out.println("[VictoryMod] " + structureName + " relaxing radius and proximity constraints");
-        pos = findDungeonLocation(level, rand, spawnX, spawnZ, minRadius, maxRadius, 0, false, false, rules);
-        if (pos != null) {
-            placeStructure(level, structureName, pos);
+        // Strategy 3: Relax inner radius, keep valid terrain, max radius, and buffer
+        System.out.println("[VictoryMod] " + structureName + " relaxing inner radius to preserve structure buffer");
+        pos = findDungeonLocation(level, rand, spawnX, spawnZ, 0, maxRadius, bufferDistance, true, true, rules);
+        if (pos != null && placeStructure(level, structureName, pos)) {
             return pos;
         }
 
-        // Strategy 5: Force placement at a random location near spawn
-        System.out.println("[VictoryMod] " + structureName + " forcing placement near spawn");
-        int forceX = spawnX + rand.nextInt(400) - 200;
-        int forceZ = spawnZ + rand.nextInt(400) - 200;
+        // Strategy 4: Relax terrain and inner radius, keep max radius and buffer
+        System.out.println("[VictoryMod] " + structureName + " relaxing terrain validation and inner radius");
+        pos = findDungeonLocation(level, rand, spawnX, spawnZ, 0, maxRadius, bufferDistance, false, true, rules);
+        if (pos != null && placeStructure(level, structureName, pos)) {
+            return pos;
+        }
+
+        // Strategy 5: Last resort inside configured radius: valid terrain, ignore buffer
+        System.out.println("[VictoryMod] " + structureName + " relaxing buffer constraint");
+        pos = findDungeonLocation(level, rand, spawnX, spawnZ, minRadius, maxRadius, 0, true, true, rules);
+        if (pos != null && placeStructure(level, structureName, pos)) {
+            return pos;
+        }
+
+        // Strategy 6: Valid terrain anywhere within max radius, ignore buffer
+        System.out.println("[VictoryMod] " + structureName + " relaxing buffer and inner radius constraints");
+        pos = findDungeonLocation(level, rand, spawnX, spawnZ, 0, maxRadius, 0, true, true, rules);
+        if (pos != null && placeStructure(level, structureName, pos)) {
+            return pos;
+        }
+
+        // Strategy 7: Any terrain inside max radius, ignore buffer
+        System.out.println("[VictoryMod] " + structureName + " relaxing buffer and terrain constraints");
+        pos = findDungeonLocation(level, rand, spawnX, spawnZ, 0, maxRadius, 0, false, true, rules);
+        if (pos != null && placeStructure(level, structureName, pos)) {
+            return pos;
+        }
+
+        // Strategy 8: Force placement within max radius
+        System.out.println("[VictoryMod] " + structureName + " forcing placement within max radius");
+        double angle = rand.nextDouble() * Math.PI * 2.0;
+        int radius = maxRadius <= 0 ? 0 : rand.nextInt(maxRadius + 1);
+        int forceX = spawnX + (int) Math.round(radius * Math.cos(angle));
+        int forceZ = spawnZ + (int) Math.round(radius * Math.sin(angle));
         BlockPos forcePos = createCandidatePos(level, rand, forceX, forceZ, rules);
         if (forcePos == null) {
             forcePos = new BlockPos(forceX, getGroundY(level, forceX, forceZ), forceZ);
         }
-        placeStructure(level, structureName, forcePos);
-        return forcePos;
+        return placeStructure(level, structureName, forcePos) ? forcePos : null;
     }
 
     /**
@@ -166,20 +257,22 @@ public class StructureSpawner {
         StructureRules rules
     ) {
         int attempts = 0;
-        int maxAttempts = 100;
+        int maxAttempts = 300;
+        int searchMaxRadius = Math.max(0, maxRadius);
+        int searchMinRadius = Math.max(0, Math.min(minRadius, searchMaxRadius));
 
         while (attempts < maxAttempts) {
             int x, z;
 
             if (enforceRadius) {
                 double angle = rand.nextDouble() * Math.PI * 2.0;
-                int radius = minRadius + rand.nextInt(maxRadius - minRadius + 1);
+                int radius = searchMinRadius + rand.nextInt(searchMaxRadius - searchMinRadius + 1);
                 x = spawnX + (int) Math.round(radius * Math.cos(angle));
                 z = spawnZ + (int) Math.round(radius * Math.sin(angle));
             } else {
                 // Any location within a larger search area
-                x = spawnX + rand.nextInt(maxRadius * 2) - maxRadius;
-                z = spawnZ + rand.nextInt(maxRadius * 2) - maxRadius;
+                x = spawnX + rand.nextInt(searchMaxRadius * 2 + 1) - searchMaxRadius;
+                z = spawnZ + rand.nextInt(searchMaxRadius * 2 + 1) - searchMaxRadius;
             }
 
             if (!biomeMatches(level, x, z, rules.biomeRules)) {
@@ -324,26 +417,39 @@ public class StructureSpawner {
         return false;
     }
 
-    private static void placeStructure(ServerLevel level, String name, BlockPos pos) {
+    private static boolean placeStructure(ServerLevel level, String name, BlockPos pos) {
         ResourceLocation templateId = ResourceLocation.tryParse("victorymod:" + name);
         if (templateId == null) {
             System.err.println("[VictoryMod] invalid structure id: " + name);
-            return;
+            return false;
         }
 
         StructureTemplate template = level.getStructureManager().getOrCreate(templateId);
 
         if (template == null) {
             System.err.println("[VictoryMod] structure not found: " + name + " (id=" + templateId + ")");
-            return;
+            return false;
         }
 
         boolean placed = template.placeInWorld(level, pos, pos, new StructurePlaceSettings(), level.random, 3);
         if (!placed) {
-            System.err.println("[VictoryMod] failed to place structure " + name + " at " + pos);
+            if (shouldRevealLocation(name)) {
+                System.err.println("[VictoryMod] failed to place structure " + name + " at " + pos);
+            } else {
+                System.err.println("[VictoryMod] failed to place structure " + name);
+            }
         } else {
-            System.out.println("[VictoryMod] placed " + name + " at " + pos);
+            if (shouldRevealLocation(name)) {
+                System.out.println("[VictoryMod] placed " + name + " at " + pos);
+            } else {
+                System.out.println("[VictoryMod] placed " + name);
+            }
         }
+        return placed;
+    }
+
+    private static boolean shouldRevealLocation(String structureName) {
+        return "victory_monument".equals(structureName);
     }
 
     private static StructureRules getRulesForStructure(String structureName, JsonObject defaultRules, JsonObject structureOverrides) {

@@ -2,7 +2,7 @@
 
 A Minecraft Forge mod for Minecraft 1.20.1 that spawns a victory monument at world spawn with 16 colored dungeons containing wool samples. Collect all wool colors to achieve victory!
 
-Current release channel: **Beta** (`1.0.0-beta.1`).
+Current release: **1.0.0**.
 
 ## Features
 
@@ -94,7 +94,7 @@ This project is based on the Forge MDK for 1.20.1-47.4.10. If starting from scra
 ./gradlew build
 ```
 
-This will compile the mod and generate the JAR file at `build/libs/victorymod-1.0.0-beta.1.jar`. Copy this JAR to your Prism Launcher instance's mods folder to install the mod.
+This will compile the mod and generate the JAR file at `build/libs/victorymonument-1.0.0.jar`. Copy this JAR to your Prism Launcher instance's mods folder to install the mod.
 
 ## Running the Mod
 
@@ -166,9 +166,9 @@ Example:
 
 ```json5
 {
-  "minDungeonRadius": 40,
+  "minDungeonRadius": 200,
   "maxDungeonRadius": 750,
-  "structureBufferDistance": 30,
+  "structureBufferDistance": 64,
 
   "defaultRules": {
     "biomes": {
@@ -240,14 +240,16 @@ Example:
 - Repository: https://github.com/0dividedby0/VictoryMonument
 - Issues: https://github.com/0dividedby0/VictoryMonument/issues
 
-## Release Notes (1.0.0-beta.1)
+## Release Notes (1.0.0)
 
-- Initial beta release on Forge 1.20.1.
+- Stable Forge 1.20.1 release.
 - Added monument and dungeon world-generation pipeline.
 - Added all 16 color objective dungeons.
-- Added configurable generation radius and spacing.
+- Added configurable generation radius, spacing, biome rules, and height rules.
 - Added wool placement tracking and completion trigger.
 - Added persistent generation state and in-game config UI.
+- Improved dungeon placement fallbacks so the configured max radius remains the hard cap while terrain and spacing constraints relax progressively.
+- Increased default dungeon spacing and minimum spawn radius to reduce structure overlap near world spawn.
 
 ## Contributing
 
